@@ -1,14 +1,10 @@
 #!/bin/bash
 
-#./ios_build.sh build clean
-
 set -e
 TEAM_ID="Ivan Provalov"
 
 if [ "$1" == "help" ]; then
   echo "Run bash ios_build.sh build clean"
-  echo "Run bash ios_build.sh version"
-#  echo "Go to Xcode Archive Organizer and upload!"
   exit
 fi
 
