@@ -77,3 +77,4 @@ third_party/abseil-cpp
 python/sentencepiece
 build-ios-backup
 build-ios
+cmake-build-debug
