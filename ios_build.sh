@@ -3,11 +3,12 @@
 set -e
 TEAM_ID="Ivan Provalov"
 
+#./ios_build.sh build clean
 # This will configure cmake build.  After this step, open the project in XCode and you may need to make some changes for the build time:
 #1. Build Settings -> Other Linker Flags - make sure has the file names as libsentencepiece.0.0.0 for @rpath
 #2. Check iphone and iPad under General on each specific target - this may not be required.
 #3. PROJECT LEVEL - Build Settings - Build Active Architecture Only - NO
-#4. Build both sentencepiece and sentencepiece_train separately
+#4. Build all four - sentencepiece+static and sentencepiece_train+static separately, WHILE SPECIFYING BOTH arm64 AND x86_64 ARCHITECTURES in XCode
 #5. Open build-os folder containing dylib in Finder
 #6. Drag and drop the dylib in XCode (Do not copy) to you target app project
 #7. Make sure these are now linked to the Target in both Binary and Embed Libraries under Build Phases of the specific target
@@ -28,5 +29,6 @@ if [ "$2" == "clean" ]; then rm -Rf build-ios; fi
 # generate new builds
 cmake -Bbuild-ios -GXcode -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-    -DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM="$TEAM_ID"
+    -DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM="$TEAM_ID" \
+    -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
 fi
