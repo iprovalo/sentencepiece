@@ -11,7 +11,7 @@ TEAM_ID="U4W5V9S4C3"
   #4. Build all four - sentencepiece+static and sentencepiece_train+static separately, WHILE SPECIFYING BOTH arm64 AND x86_64 ARCHITECTURES in XCode
 #Then run xcframework.sh to create a xcframework
 #5. Open build-os/Debug-universal folder containing xcframework in Finder
-#6. Drag and drop the dylib in XCode (Do not copy) to you target app project (lingofonex-ios)
+#6. Drag and drop the dylib in XCode (check copy) to you target app project (lingofonex-ios)
 #7. Make sure these are now linked to the Target in both Binary and Embed Libraries under Build Phases of the specific target
 #8. Make sure these are findable - Build Settings of the specific target - Header and Library Search Paths include recursive references to the header folder src and build-ios folder of the sentencepiece
 
