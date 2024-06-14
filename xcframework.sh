@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-CONFIG=Debug
+CONFIG=Release
 # Define the source and destination directories
 SOURCE_DIR="src/"
 DEST_HEADER_DIR="build-ios/include"
