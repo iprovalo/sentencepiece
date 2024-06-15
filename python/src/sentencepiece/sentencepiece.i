@@ -3,6 +3,7 @@
 
 %{
 
+#include <atomic>
 #include <iostream>
 #include <algorithm>
 #include <functional>
@@ -246,9 +247,11 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
   InitNumThreads(ins, &num_threads);                                    \
   {                                                                     \
     ThreadPool pool(ins.size());                                        \
+    std::atomic<size_t> index = 0;                                      \
     for (int n = 0;  n < num_threads; ++n) {                            \
-      pool.Schedule([&, n]() {                                          \
-          for (size_t i = n; i < ins.size(); i += num_threads) {        \
+      pool.Schedule([&]() {                                             \
+          size_t i = 0;                                                 \
+          while ((i = std::atomic_fetch_add(&index, 1)) < outs.size()) { \
             auto out = enable_sampling ?                                \
                        self->Sample##FuncName(ins[i],                   \
                                               nbest_size, alpha) :      \
@@ -267,10 +270,12 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
   std::vector<OutType> outs(ins.size());                                \
   InitNumThreads(ins, &num_threads);                                    \
   {                                                                     \
+    std::atomic<size_t> index = 0;                                      \
     ThreadPool pool(ins.size());                                        \
     for (int n = 0;  n < num_threads; ++n) {                            \
-      pool.Schedule([&, n]() {                                          \
-          for (size_t i = n; i < ins.size(); i += num_threads) {        \
+      pool.Schedule([&]() {                                             \
+          size_t i = 0;                                                 \
+          while ((i = std::atomic_fetch_add(&index, 1)) < outs.size()) { \
             CheckIds(ins[i], self->GetPieceSize());                     \
             auto out = self->FuncName(ins[i]);                          \
             ConvertToUnicodeSpans(&out);                                \
@@ -342,7 +347,11 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
 %ignore sentencepiece::SentencePieceProcessor::DecodePiecesAsImmutableProto;
 %ignore sentencepiece::SentencePieceProcessor::DecodeIdsAsImmutableProto;
 
+%ignore sentencepiece::SentencePieceProcessor::Normalize;
+%ignore sentencepiece::SentencePieceProcessor::NormalizeWithOffsets;
+
 %ignore sentencepiece::SentencePieceProcessor::model_proto;
+%ignore sentencepiece::SentencePieceProcessor::mutable_normalizer_spec;
 %ignore sentencepiece::SentencePieceProcessor::Load;
 %ignore sentencepiece::SentencePieceProcessor::LoadOrDie;
 %ignore sentencepiece::SentencePieceProcessor::SetModel;
@@ -359,6 +368,11 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
 %ignore sentencepiece::SentencePieceTrainer::PieceProcecssor;
 %ignore sentencepiece::SentencePieceTrainer::SetPretokenizerForTraining;
 %ignore sentencepiece::SentencePieceTrainer::GetPretokenizerForTraining;
+%ignore sentencepiece::ConvertToUnicodeAlignment;
+
+%ignore sentencepiece::SentencePieceNormalizer::Load;
+%ignore sentencepiece::SentencePieceNormalizer::Normalize;
+%ignore sentencepiece::SentencePieceNormalizer::mutable_normalizer_spec;
 
 %ignore sentencepiece::io::LoadModelProto;
 %ignore sentencepiece::io::SaveModelProto;
@@ -468,6 +482,11 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
     return $self->DecodeIds(ids);
   }
 
+  sentencepiece::util::bytes _DecodeIdsAsBytes(const std::vector<int> &ids) const {
+    CheckIds(ids, $self->GetPieceSize());
+    return $self->DecodeIds(ids);
+  }
+
   std::string _DecodePieces(const std::vector<absl::string_view> &pieces) const {
     return $self->DecodePieces(pieces);
   }
@@ -503,6 +522,11 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
   /////////////////////////////////////////////////////////////////////////////
   // DecodeAs* (Batch request)
   std::vector<std::string> _DecodeIdsBatch(
+      const std::vector<std::vector<int>> &ins, int num_threads) const {
+    DEFINE_DECODE_BATCH_FUNC_IMPL(DecodeIds, int, std::string);
+  }
+
+  BytesArray _DecodeIdsAsBytesBatch(
       const std::vector<std::vector<int>> &ins, int num_threads) const {
     DEFINE_DECODE_BATCH_FUNC_IMPL(DecodeIds, int, std::string);
   }
@@ -643,6 +667,16 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
     return proto;
   }
 
+  // Normalize
+  std::string _Normalize(absl::string_view text) {
+    return $self->Normalize(text);
+  }
+
+  std::pair<std::string, std::vector<size_t>> _NormalizeWithOffsets(absl::string_view text) {
+    std::pair<std::string, std::vector<size_t>> result;
+    $self->Normalize(text, &result.first, &result.second).IgnoreError();
+    return result;
+  }
 
   // Calculate Entropy
   float _CalculateEntropy(absl::string_view text, float alpha)  {
@@ -655,15 +689,30 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
     InitNumThreads(ins, &num_threads);
     {
       ThreadPool pool(ins.size());
+      std::atomic<size_t> index = 0;
       for (int n = 0;  n < num_threads; ++n) {
-        pool.Schedule([&, n]() {
-            for (size_t i = n; i < ins.size(); i += num_threads) {
-              outs[i] = self->CalculateEntropy(ins[i], alpha);
-          }
-        });
+        pool.Schedule([&]() {
+           size_t i = 0;
+           while ((i = std::atomic_fetch_add(&index, 1)) < outs.size()) {
+             outs[i] = self->CalculateEntropy(ins[i], alpha);
+           }
+         });
       }
     }
     return outs;
+  }
+
+  // override normalizer_spec
+  sentencepiece::util::Status _OverrideNormalizerSpec(
+      const std::unordered_map<std::string, std::string> &args) {
+    sentencepiece::util::Status status;
+    for (const auto &[key, value] : args) {
+      status = sentencepiece::SentencePieceTrainer::SetProtoField(
+          key, value,
+          $self->mutable_normalizer_spec());
+      if (!status.ok()) return status;
+    }
+    return status;
   }
 
 %pythoncode {
@@ -1013,18 +1062,18 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
   def SampleEncodeAndScoreAsSerializedProto(self, input, num_samples=None, alpha=None, **kwargs):
     return self.SampleEncodeAndScore(input=input, num_samples=num_samples, alpha=alpha,
                                      out_type='serialized_proto', **kwargs)
-        
+
 
   def SampleEncodeAndScoreAsImmutableProto(self, input, num_samples=None, alpha=None, **kwargs):
     return self.SampleEncodeAndScore(input=input, num_samples=num_samples, alpha=alpha,
                                      out_type='immutable_proto', **kwargs)
-          
+
 
   def Decode(self, input, out_type=str, num_threads=None):
     """Decode processed id or token sequences.
 
     Args:
-      out_type: output type. str or 'serialized_proto' or 'immutable_proto' (Default = str)
+      out_type: output type. str, bytes or 'serialized_proto' or 'immutable_proto' (Default = str)
       num_threads: the number of threads used in the batch processing (Default = -1).
     """
 
@@ -1052,6 +1101,24 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
         if type(input[0]) is list:
           if len(input[0]) == 0 or type(input[0][0]) is int:
            return self._DecodeIdsBatch(input, num_threads)
+          if type(input[0][0]) is str:
+           return self._DecodePiecesBatch(input, num_threads)
+
+    if out_type is bytes:
+      if type(input) is int:
+        return self._DecodeIdsAsBytes([input])
+      if type(input) is str:
+        return self._DecodePieces([input])
+
+      if type(input) is list:
+        if len(input) == 0 or type(input[0]) is int:
+          return self._DecodeIdsAsBytes(input)
+        if type(input[0]) is str:
+          return self._DecodePieces(input)
+
+        if type(input[0]) is list:
+          if len(input[0]) == 0 or type(input[0][0]) is int:
+           return self._DecodeIdsAsBytesBatch(input, num_threads)
           if type(input[0][0]) is str:
            return self._DecodePiecesBatch(input, num_threads)
 
@@ -1131,6 +1198,23 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
       return self._CalculateEntropyBatch(input, alpha, num_threads)
 
     return self._CalculateEntropy(input, alpha)
+
+
+  def Normalize(self, input, with_offsets=None):
+    def _normalize(text):
+      if with_offsets:
+        return self._NormalizeWithOffsets(text)
+      return self._Normalize(text)
+
+    if type(input) is list:
+      return [_normalize(x) for x in input]
+    return _normalize(input)
+
+  def OverrideNormalizerSpec(self, **kwargs):
+    new_kwargs = {}
+    for key, value in kwargs.items():
+      new_kwargs[key] = str(value)
+    return self._OverrideNormalizerSpec(new_kwargs)
 
 
   def piece_size(self):
@@ -1262,16 +1346,114 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
 }
 }
 
+%extend sentencepiece::SentencePieceNormalizer {
+  sentencepiece::util::Status LoadFromFile(absl::string_view arg) {
+    return $self->Load(arg);
+  }
+
+  std::string _Normalize(absl::string_view text) {
+    std::string result;
+    const auto _status = $self->Normalize(text, &result);
+    if (!_status.ok()) throw _status;
+    return result;
+  }
+
+  std::pair<std::string, std::vector<size_t>> _NormalizeWithOffsets(absl::string_view text) {
+    std::pair<std::string, std::vector<size_t>> result;
+    const auto _status = $self->Normalize(text, &result.first, &result.second);
+    if (!_status.ok()) throw _status;
+    return result;
+  }
+
+  void _SetProtoField(absl::string_view name, bool value) {
+    sentencepiece::SentencePieceTrainer::SetProtoField(
+        name,
+        value ? "1" : "0",
+        $self->mutable_normalizer_spec()).IgnoreError();
+  }
+
+%pythoncode %{
+  def Init(self,
+           model_file=None,
+           model_proto=None,
+           rule_tsv=None,
+           rule_name=None,
+           add_dummy_prefix=False,
+           escape_whitespaces=False,
+           remove_extra_whitespaces=False):
+    """Initialzie sentencePieceNormalizer.
+
+    Args:
+      model_file: The sentencepiece model file path.
+      model_proto: The sentencepiece model serialized proto.
+      rule_tsv: The normalization rule file in TSV format.
+      rule_name: Pre-defined normalization name.
+      add_dummy_prefix: add dummy prefix.
+      escape_whitespaces: escape whitespaces.
+      remove_extra_whitespaces: remove extra whitespaces.
+    """
+
+    _sentencepiece_normalizer_init_native(self)
+
+    if model_file:
+      status = self.LoadFromFile(model_file)
+    elif model_proto:
+      status = self.LoadFromSerializedProto(model_proto)
+    elif rule_tsv:
+      status = self.LoadFromRuleTSV(rule_tsv)
+    elif rule_name:
+      status = self.LoadFromRuleName(rule_name)
+    else:
+      raise RuntimeError('no model is specified')
+
+    if status:
+      self._SetProtoField('add_dummy_prefix', add_dummy_prefix)
+      self._SetProtoField('escape_whitespaces', escape_whitespaces)
+      self._SetProtoField('remove_extra_whitespaces', remove_extra_whitespaces)
+
+  def Normalize(self, input, with_offsets=None):
+    def _normalize(text):
+      if with_offsets:
+        return self._NormalizeWithOffsets(text)
+      return self._Normalize(text)
+
+    if type(input) is list:
+      return [_normalize(x) for x in input]
+    return _normalize(input)
+
+
+  def __getstate__(self):
+    return self.serialized_model_proto()
+
+
+  def __setstate__(self, serialized_model_proto):
+    self.__init__()
+    self.LoadFromSerializedProto(serialized_model_proto)
+%}
+}
+
 %extend sentencepiece::ImmutableSentencePieceText_ImmutableSentencePiece {
+  const sentencepiece::util::bytes& _surface_as_bytes() const {
+    return $self->surface();
+  }
+
+  const sentencepiece::util::bytes& _piece_as_bytes() const {
+    return $self->piece();
+  }
+
   %rename(_piece) piece;
+  %rename(_piece_as_bytes) piece_as_bytes;
   %rename(_id) id;
   %rename(_surface) surface;
+  %rename(_surface_as_bytes) surface_as_bytes;
   %rename(_begin) begin;
   %rename(_end) end;
 
   %pythoncode %{
     piece = property(_piece)
+    piece_as_bytes = property(_piece_as_bytes)
     surface = property(_surface)
+    surface_as_bytes = property(_surface_as_bytes)
     id = property(_id)
     begin = property(_begin)
     end = property(_end)
@@ -1295,20 +1477,26 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
 }
 
 %extend sentencepiece::ImmutableSentencePieceText {
+  const sentencepiece::util::bytes& _text_as_bytes() const {
+    return $self->text();
+  }
+
   %rename(_text) text;
+  %rename(_text_as_bytes) text_as_bytes;
   %rename(_score) score;
   %rename(_pieces) pieces;
   %rename(_pieces_size) pieces_size;
 
   %pythoncode %{
     text = property(_text)
+    text_as_bytes = property(_text_as_bytes)
     score = property(_score)
 
     class ImmutableSentencePieceIterator:
       def __init__(self, proto):
         self.proto = proto
         self.len = self.proto._pieces_size()
-    
+
       def __len__(self):
         return self.len
 
@@ -1376,7 +1564,7 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
     @property
     def nbests(self):
       return ImmutableNBestSentencePieceText.ImmutableSentencePieceTextIterator(self)
-              
+
     def __eq__(self, other):
       return self.SerializeAsString() == other.SerializeAsString()
 
@@ -1442,6 +1630,14 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
   }
 }
 
+%typemap(out) sentencepiece::util::bytes {
+  $result = MakePyOutputBytes($1);
+}
+
+%typemap(out) const sentencepiece::util::bytes& {
+  $result = MakePyOutputBytes(*$1);
+}
+
 %typemap(out) std::string {
   PyObject *input_type = resultobj;
   $result = MakePyOutputString($1, input_type);
@@ -1452,16 +1648,12 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
   $result = MakePyOutputString(*$1, input_type);
 }
 
-%typemap(out) sentencepiece::util::bytes {
-  $result = MakePyOutputBytes($1);
-}
-
 %typemap(out) sentencepiece::util::Status {
   if (!$1.ok()) {
     SWIG_exception(ToSwigError($1.code()), $1.ToString().c_str());
   }
-  $result = SWIG_From_bool($1.ok());
-}
+  $result = SWIG_From_bool($1.ok());}
+
 
 %typemap(in) const std::string & {
   const PyInputString ustring($input);
@@ -1647,6 +1839,19 @@ inline void InitNumThreads(const std::vector<T> &ins, int *num_threads) {
   }
 }
 
+// Types for normalized string and offset
+%typemap(out) std::pair<std::string, std::vector<size_t>> {
+  PyObject *input_type = resultobj;
+  if (PyInputString::IsUnicode(input_type)) {
+    sentencepiece::ConvertToUnicodeAlignment(arg2, $1.first, &$1.second);
+  }
+  PyObject *obj = PyList_New($1.second.size());
+  for (size_t i = 0; i < $1.second.size(); ++i) {
+    PyList_SET_ITEM(obj, i, PyInt_FromLong(static_cast<long>($1.second[i])));
+  }
+  $result = PyTuple_Pack(2, MakePyOutputString($1.first, input_type), obj);
+}
+
 %typemap(in) sentencepiece::SentenceIterator * {
   sentencepiece::SentenceIterator *out = nullptr;
   if (PyIter_Check($input)) {
@@ -1750,7 +1955,9 @@ def _batchnize(classname, name):
 
 
 _sentencepiece_processor_init_native = SentencePieceProcessor.__init__
+_sentencepiece_normalizer_init_native = SentencePieceNormalizer.__init__
 setattr(SentencePieceProcessor, '__init__', SentencePieceProcessor.Init)
+setattr(SentencePieceNormalizer, '__init__', SentencePieceNormalizer.Init)
 
 SentencePieceProcessor.Tokenize = SentencePieceProcessor.Encode
 SentencePieceProcessor.Detokenize = SentencePieceProcessor.Decode
@@ -1763,7 +1970,9 @@ for m in [
 
 _add_snake_case(SentencePieceProcessor)
 _add_snake_case(SentencePieceTrainer)
+_add_snake_case(SentencePieceNormalizer)
 set_random_generator_seed = SetRandomGeneratorSeed
+set_min_log_level = SetMinLogLevel
 
 from ._version import __version__
 

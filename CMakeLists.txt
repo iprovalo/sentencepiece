@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.!
 
-cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 file(STRINGS "VERSION.txt" SPM_VERSION)
 message(STATUS "VERSION: ${SPM_VERSION}")
 
@@ -38,9 +38,17 @@ option(SPM_ENABLE_TENSORFLOW_SHARED "Makes a tensorflow compatible shared file."
 option(SPM_ENABLE_TCMALLOC "Enable TCMalloc if available." ON)
 option(SPM_TCMALLOC_STATIC "Link static library of TCMALLOC." OFF)
 option(SPM_NO_THREADLOCAL "Disable thread_local operator" OFF)
-option(SPM_USE_BUILTIN_PROTOBUF "Use built-in protobuf" ON)
-option(SPM_USE_EXTERNAL_ABSL "Use external abseil" OFF)
 option(SPM_ENABLE_MSVC_MT_BUILD, "Use /MT flag in MSVC build" OFF)
+option(SPM_CROSS_SYSTEM_PROCESSOR, "Override system processor" "")
+
+set(SPM_PROTOBUF_PROVIDER "internal" CACHE STRING "Provider of protobuf library")
+set_property(CACHE SPM_PROTOBUF_PROVIDER PROPERTY STRINGS "internal" "package")
+set(SPM_ABSL_PROVIDER "internal" CACHE STRING "Provider of absl library")
+set_property(CACHE SPM_ABSL_PROVIDER PROPERTY STRINGS "internal" "module" "package")
+
+if (SPM_CROSS_SYSTEM_PROCESSOR)
+ set(CMAKE_SYSTEM_PROCESSOR ${SPM_CROSS_SYSTEM_PROCESSOR})
+endif()
 
 # Disable shared build on windows
 if(WIN32)
@@ -55,6 +63,18 @@ if((CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
      CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 8.0))
   string(APPEND CMAKE_CXX_FLAGS " -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=''")
+endif()
+
+if (NOT DEFINED CMAKE_INSTALL_BINDIR)
+  set(CMAKE_INSTALL_BINDIR bin)
+endif()
+
+if (NOT DEFINED CMAKE_INSTALL_LIBDIR)
+  set(CMAKE_INSTALL_LIBDIR lib)
+endif()
+
+if (NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
+  set(CMAKE_INSTALL_INCLUDEDIR include)
 endif()
 
 if (UNIX)
@@ -78,7 +98,7 @@ endif()
 if (SPM_USE_BUILTIN_PROTOBUF)
   set(libprotobuf_lite "")
 else()
-  set(libprotobuf_lite "-lprotobuf-lite")
+  set(libprotobuf_lite "protobuf-lite")
 endif()
 
 if (MSVC)
@@ -101,18 +121,6 @@ if (APPLE)
   if ("${isSystemDir}" STREQUAL "-1")
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
   endif()
-endif()
-
-if (NOT DEFINED CMAKE_INSTALL_BINDIR)
-  set(CMAKE_INSTALL_BINDIR bin)
-endif()
-
-if (NOT DEFINED CMAKE_INSTALL_LIBDIR)
-  set(CMAKE_INSTALL_LIBDIR lib)
-endif()
-
-if (NOT DEFINED CMAKE_INSTALL_INCDIR)
-  set(CMAKE_INSTALL_INCDIR include)
 endif()
 
 # SPDX-License-Identifier: (MIT OR CC0-1.0)
@@ -154,8 +162,30 @@ if (SPM_BUILD_TEST)
   enable_testing()
 endif()
 
-if (SPM_USE_EXTERNAL_ABSL)
- add_subdirectory(third_party/abseil-cpp)
+if (SPM_ABSL_PROVIDER STREQUAL "internal")
+  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/absl)
+elseif (SPM_ABSL_PROVIDER STREQUAL "module")
+  include(FetchContent)
+  FetchContent_Populate(abseil-cpp
+        GIT_REPOSITORY  https://github.com/abseil/abseil-cpp.git
+        SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/abseil-cpp
+        GIT_PROGRESS TRUE)
+  add_subdirectory(third_party/abseil-cpp)
+  if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/absl.org)
+    file(RENAME ${CMAKE_CURRENT_SOURCE_DIR}/third_party/absl ${CMAKE_CURRENT_SOURCE_DIR}/third_party/absl.org)
+    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
+      ${CMAKE_CURRENT_SOURCE_DIR}/third_party/abseil-cpp/absl
+      ${CMAKE_CURRENT_SOURCE_DIR}/third_party/absl)
+  endif()
+elseif (SPM_ABSL_PROVIDER STREQUAL "package")
+  find_package(absl REQUIRED)
+  get_target_property(ABSL_INCLUDE_DIRS absl::base INTERFACE_INCLUDE_DIRECTORIES)
+  if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/absl.org)
+    file(RENAME ${CMAKE_CURRENT_SOURCE_DIR}/third_party/absl ${CMAKE_CURRENT_SOURCE_DIR}/third_party/absl.org)
+    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
+        ${ABSL_INCLUDE_DIRS}/absl ${CMAKE_CURRENT_SOURCE_DIR}/third_party/absl)
+  endif()
+  include_directories(${ABSL_INCLUDE_DIRS})
 endif()
 
 add_subdirectory(src)
