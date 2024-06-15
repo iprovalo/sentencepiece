@@ -18,7 +18,6 @@
 #include <vector>
 
 #include "common.h"
-#include "third_party/absl/memory/memory.h"
 #include "third_party/absl/strings/match.h"
 #include "third_party/absl/strings/string_view.h"
 #include "third_party/absl/strings/strip.h"
@@ -58,7 +57,7 @@ void Normalizer::Init() {
     if (!status_.ok()) return;
 
     // Reads the body of double array.
-    trie_ = absl::make_unique<Darts::DoubleArray>();
+    trie_ = std::make_unique<Darts::DoubleArray>();
 
     // The second arg of set_array is not the size of blob,
     // but the number of double array units.
@@ -163,7 +162,7 @@ util::Status Normalizer::Normalize(absl::string_view input,
     }
   }
 
-  // Ignores tailing space.
+  // Ignores trailing space.
   if (spec_->remove_extra_whitespaces()) {
     const absl::string_view space =
         spec_->escape_whitespaces() ? kSpaceSymbol : " ";
@@ -258,15 +257,15 @@ std::string Normalizer::EncodePrecompiledCharsMap(
     absl::string_view trie_blob, absl::string_view normalized) {
   // <trie size(4byte)><double array trie><normalized string>
   std::string blob;
-  blob.append(string_util::EncodePOD<uint32>(trie_blob.size()));
+  blob.append(string_util::EncodePOD<uint32_t>(trie_blob.size()));
   blob.append(trie_blob.data(), trie_blob.size());
-  blob.append(normalized.data(), normalized.size());
 
 #ifdef IS_BIG_ENDIAN
-  uint32 *data = reinterpret_cast<uint32 *>(const_cast<char *>(blob.data()));
-  for (int i = 0; i <= trie_blob.size() / 4; ++i)
-    data[i] = util::Swap32(data[i]);
+  uint32_t *data = reinterpret_cast<uint32_t *>(blob.data());
+  for (int i = 0; i < blob.size() / 4; ++i) data[i] = util::Swap32(data[i]);
 #endif
+
+  blob.append(normalized.data(), normalized.size());
 
   return blob;
 }
@@ -275,12 +274,11 @@ std::string Normalizer::EncodePrecompiledCharsMap(
 util::Status Normalizer::DecodePrecompiledCharsMap(
     absl::string_view blob, absl::string_view *trie_blob,
     absl::string_view *normalized, std::string *buffer) {
-  uint32 trie_blob_size = 0;
+  uint32_t trie_blob_size = 0;
   if (blob.size() <= sizeof(trie_blob_size) ||
-      !string_util::DecodePOD<uint32>(
+      !string_util::DecodePOD<uint32_t>(
           absl::string_view(blob.data(), sizeof(trie_blob_size)),
-          &trie_blob_size) ||
-      trie_blob_size >= blob.size()) {
+          &trie_blob_size)) {
     return util::InternalError("Blob for normalization rule is broken.");
   }
 
@@ -288,15 +286,17 @@ util::Status Normalizer::DecodePrecompiledCharsMap(
   trie_blob_size = util::Swap32(trie_blob_size);
 #endif
 
-  if (trie_blob_size >= blob.size())
+  if (trie_blob_size >= blob.size()) {
     return util::InternalError("Trie data size exceeds the input blob size.");
+  }
 
   blob.remove_prefix(sizeof(trie_blob_size));
 
 #ifdef IS_BIG_ENDIAN
+  CHECK_OR_RETURN(buffer);
   buffer->assign(blob.data(), trie_blob_size);
-  uint32 *data = reinterpret_cast<uint32 *>(const_cast<char *>(buffer->data()));
-  for (int i = 0; i < trie_blob_size / 4; ++i) data[i] = util::Swap32(data[i]);
+  uint32_t *data = reinterpret_cast<uint32_t *>(const_cast<char *>(buffer->data()));
+  for (int i = 0; i < buffer->size() / 4; ++i) data[i] = util::Swap32(data[i]);
   *trie_blob = absl::string_view(buffer->data(), trie_blob_size);
 #else
   *trie_blob = absl::string_view(blob.data(), trie_blob_size);
@@ -313,9 +313,12 @@ PrefixMatcher::PrefixMatcher(const std::set<absl::string_view> &dic) {
   std::vector<const char *> key;
   key.reserve(dic.size());
   for (const auto &it : dic) key.push_back(it.data());
-  trie_ = absl::make_unique<Darts::DoubleArray>();
-  CHECK_EQ(0, trie_->build(key.size(), const_cast<char **>(&key[0]), nullptr,
-                           nullptr));
+  trie_ = std::make_unique<Darts::DoubleArray>();
+  if (trie_->build(key.size(), const_cast<char **>(&key[0]), nullptr,
+                   nullptr) != 0) {
+    LOG(ERROR) << "Failed to build the TRIE for PrefixMatcher";
+    trie_.reset();
+  }
 }
 
 int PrefixMatcher::PrefixMatch(absl::string_view w, bool *found) const {
