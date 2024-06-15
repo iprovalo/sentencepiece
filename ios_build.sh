@@ -34,10 +34,43 @@ cmake -Bbuild-ios -GXcode -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
 fi
 
+#cd build-ios
+
+#xcodebuild -project sentencepiece.xcodeproj -scheme sentencepiece -configuration Release -sdk iphoneos CONFIGURATION_BUILD_DIR=src
+
+#xcodebuild archive \
+#  -scheme sentencepiece \
+#  -configuration Release \
+#  -destination "generic/platform=iOS" \
+#  -archivePath "./build/ios_devices.xcarchive" \
+#  SKIP_INSTALL=NO \
+#  BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+
+
+
+#xcodebuild archive \
+#  -scheme sentencepiece \
+#  -configuration Release \
+#  -destination "generic/platform=iOS Simulator" \
+#  -archivePath "./build/ios_simulators.xcarchive" \
+#  SKIP_INSTALL=NO \
+#  BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+
+
+
+#xcodebuild -create-xcframework \
+#  -framework "./build/ios_devices.xcarchive/Products/Library/Frameworks/sentencepiece.framework" \
+#  -framework "./build/ios_simulators.xcarchive/Products/Library/Frameworks/sentencepiece.framework" \
+#  -output "./build/sentencepiece.xcframework"
+
 #cp build_universal.sh build-ios/
 
 #cd build-ios/
 
 #./build_universal.sh
+
+#-DProtobuf_INCLUDE_DIR=/opt/homebrew/Cellar/protobuf@3/3.20.3/include \
+#    -DProtobuf_LIBRARIES=/opt/homebrew/Cellar/protobuf@3/3.20.3/lib \
+#    -DSPM_USE_BUILTIN_PROTOBUF=OFF \
 
 
