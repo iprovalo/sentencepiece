@@ -23,11 +23,6 @@ DEST_HEADER_DIR="${BUILD_DIR}/include"
 
 rm -Rf "${BUILD_DIR}"
 
-#mkdir -p $BUILD_DIR/ios-device
-#mkdir -p $BUILD_DIR/ios-simulator
-
-#cd $BUILD_DIR/ios-device
-
 cmake -B${BUILD_DIR} -GXcode -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=$DEPLOYMENT_TARGET \
     -DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM="$TEAM_ID" \
