@@ -20,6 +20,14 @@ if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # This little macro lets you set any XCode specific property.
+    macro(set_xcode_property TARGET XCODE_PROPERTY XCODE_VALUE)
+        set_property(TARGET ${TARGET} PROPERTY
+                XCODE_ATTRIBUTE_${XCODE_PROPERTY} ${XCODE_VALUE})
+    endmacro(set_xcode_property)
+endif()
+
 project(sentencepiece VERSION ${SPM_VERSION} LANGUAGES C CXX)
 
 option(SPM_ENABLE_NFKC_COMPILE "Enables NFKC compile" OFF)
